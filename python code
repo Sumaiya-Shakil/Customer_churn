@@ -1,0 +1,295 @@
+#CUSTOMER CHURN ANALYSIS
+#Building a model to predict whether a customer may churn or not
+
+import warnings
+warnings.filterwarnings('ignore')
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from collections import Counter
+from imblearn.over_sampling import SMOTE
+
+from sklearn import linear_model
+from sklearn import model_selection
+from sklearn import preprocessing
+from sklearn import metrics
+from sklearn import ensemble
+from sklearn import feature_selection
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import BernoulliNB 
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+from sklearn import tree
+
+
+from sklearn.model_selection import cross_val_score
+
+data=pd.read_csv('Downloads/churn_train.csv')
+df =data.copy(deep=False)
+df.head()
+
+df.shape
+df.info()
+
+df.isna().sum()
+df.columns
+for i in df.columns:
+    print("Number Of Unique Values in", i,"is",df[i].nunique(),)
+    print("Values are:",df[i].value_counts(),"\n\n")
+    print("-----------------------------------------------------------------------------------------------------------")
+    
+# Use Label Encoding
+from sklearn import preprocessing    
+label_encoder = preprocessing.LabelEncoder()
+df['intplan'] = label_encoder.fit_transform(df['intplan'])
+df['label'] = label_encoder.fit_transform(df['label'])
+df['voice'] = label_encoder.fit_transform(df['voice'])
+print(df.dtypes)
+
+df.select_dtypes(include=object).sample(5)
+
+df.drop(columns=["phnum"],axis=1,inplace=True)
+df
+
+df.select_dtypes(exclude=["object"])
+df.describe()
+
+corr=df.corr()
+plt.figure(figsize = (15,10))
+sns.heatmap(corr,annot=True,linewidth=.5)
+
+# Dividing dataframe
+churned_df= df[df['label'] ==1]
+not_churned_df= df[df['label'] ==0]
+
+churned_df.head()
+not_churned_df.head()
+
+#Creating 3 new columns for total charges,total calls and total minutes
+
+df["t_charges"]=df[["tdchar","tecahr","tnchar"]].sum(axis=1)
+
+df["t_call"]=df[["tdcal","tecal","tncal"]].sum(axis=1)
+
+df["t_min"]=df[["tdmin","temin","tnmin"]].sum(axis=1)
+
+# EDA
+#Calculating Churn percentage w.r.t. states
+State_data = pd.crosstab(df["st"],df["label"])
+State_data['Percentage_Churn'] = State_data.apply(lambda x : x[1]*100/(x[0]+x[1]),axis = 1)
+print(State_data)
+
+#How many customer had churned or not churned in each state
+plt.figure(figsize=(18,6))
+fig=sns.countplot(data=df,x="st",order = df['st'].value_counts().index,hue="label",palette='Dark2')
+for bar in fig.patches:
+    fig.annotate(format(bar.get_height()),
+                    (bar.get_x() + bar.get_width() / 2,
+                     bar.get_height()), ha='center', va='center',
+                     size=10, xytext=(0, 8),
+                     textcoords='offset points')
+plt.title("State vs Customer behaviour")
+plt.xlabel("State")
+plt.ylabel("Number Of Customer")
+
+
+#Calculating customer percentage over area
+df["arcode"].value_counts()/df.shape[0]*100
+
+#Calculate Churn percentage w.r.t. Area code 
+
+Area_code_data = pd.crosstab(df["arcode"],df["label"])
+Area_code_data['Percentage_Churn'] = Area_code_data.apply(lambda x : x[1]*100/(x[0]+x[1]),axis = 1)
+print(Area_code_data)
+
+#Visualizing the percentage of voice plan in churned and non churned data
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+fig = make_subplots(rows=1, cols=2, specs=[[{'type':'domain'}, {'type':'domain'}]])
+fig.add_trace(go.Pie(labels=not_churned_df["voice"].unique().tolist(), values=not_churned_df["voice"].value_counts()),1, 1)
+fig.add_trace(go.Pie(labels=churned_df["voice"].unique().tolist(), values=churned_df["voice"].value_counts()),1, 2)
+fig.update_traces(hole=.4,textinfo='percent+label')
+fig.update_layout(
+    title_text="Voice Plan vs Customer behaviour",
+    # Add annotations in the center of the donut pies.
+    annotations=[dict(text='Not Churned', x=0.15, y=0.5, font_size=20, showarrow=False),
+                 dict(text='Churned', x=0.83, y=0.5, font_size=20, showarrow=False)])
+                 
+              
+
+# CHECKING FOR CLASS IMBALANCE
+df['label'].value_counts()/df.shape[0]*100
+
+# Applying 'ONE HOT ENCODING' to state and areacode
+
+df=pd.get_dummies(df,columns=["st","arcode"],drop_first=True)
+
+#separting label output data
+y = df[('label')]
+X = df.loc[:,df.columns != 'label']
+X.head()
+
+scaler = preprocessing.StandardScaler()
+X = scaler.fit_transform(X)
+print(X)
+
+print(f'Original dataset shape : {Counter(y)}')
+
+smote = SMOTE(random_state=42)
+x_res, y_res = smote.fit_resample(X, y)
+
+print(f'Resampled dataset shape {Counter(y_res)}')
+
+#SPLITTING THE DATA INTO TRAIN(80%) AND TEST DATA(20%)
+
+from sklearn.model_selection import train_test_split
+x_train, x_test, y_train, y_test = train_test_split(x_res, y_res, test_size =.2,random_state=42)
+
+x_train[:3]
+
+# IMPLEMENTING ALL MODELS TO CHECK THE BEST ONE
+
+def printmetrics(actual,predicted):
+    print('AUC : ',np.round(metrics.roc_auc_score(actual,predicted),4))
+    print('Accuracy :',np.round(metrics.accuracy_score(actual,predicted),4))
+    print('Precision : ',np.round(metrics.precision_score(actual,predicted),4))
+    print('Recall : ',np.round(metrics.recall_score(actual,predicted),4))
+    print('F1 : ',np.round(metrics.f1_score(actual,predicted),4))
+  
+# RANDOM FOREST  
+model=ensemble.RandomForestClassifier(random_state= 42)
+model.fit(x_train,y_train)
+predtrain=model.predict(x_train)
+predtest=model.predict(x_test)
+
+## Hyper parameter Tuning using GridSearchCV 
+
+hyper_dist = {
+   'max_depth':[5,6,7,8,9,10],
+    'min_samples_split':[75,80,90,100], 
+    'min_samples_leaf':[35,40,45,50],
+    'n_estimators': [10,20, 40, 60, 70, 80, 90, 100]
+}
+from sklearn.model_selection import GridSearchCV
+grid = GridSearchCV(model,param_grid = hyper_dist, cv=5,scoring='recall',n_jobs=-1)
+
+grid.fit(x_train,y_train)
+
+grid.best_params_
+model_rf=ensemble.RandomForestClassifier(n_estimators=200, criterion='gini', random_state = 42,max_depth=10, min_samples_leaf=35)
+
+      #Applying RFE for feature selection
+from sklearn.feature_selection import RFE
+
+
+select = RFE(estimator=model_rf, step=1, n_features_to_select = 7) 
+select.fit(x_train,y_train)
+
+
+print("X_train.shape: {}".format(x_train.shape))
+print(select)
+
+x_train_selected = select.transform(x_train)
+x_test_selected=  select.transform(x_test)
+print(np.where(select.support_ == True)[0])
+
+df_selected_fea_train = x_train.iloc[:, [1,  2,  4,  6, 16, 17, 70]] 
+df_selected_fea_train
+
+df_selected_fea_test = x_test.iloc[:, [1,  2,  4,  6, 16, 17, 70]] 
+
+clf = model_rf.fit(x_train_selected,y_train)
+predtrain_RF=clf.predict(x_train_selected)
+predtest_RF=clf.predict(x_test_selected)
+
+print('TRAINING METRICS')
+print('----------------')
+printmetrics(y_train,predtrain_RF)
+print("\n")
+print('TEST METRICS')
+print('----------------')
+printmetrics(y_test,predtest_RF)
+
+
+# DECISION TREE
+
+model=tree.DecisionTreeClassifier(random_state=42)
+model=model.fit(x_train,y_train)
+
+def printmetrics(actual,predicted):
+    print('AUC : ',np.round(metrics.roc_auc_score(actual,predicted),4))
+    print('Accuracy :',np.round(metrics.accuracy_score(actual,predicted),4))
+    print('Precision : ',np.round(metrics.precision_score(actual,predicted),4))
+    print('Recall : ',np.round(metrics.recall_score(actual,predicted),4))
+    print('F1 : ',np.round(metrics.f1_score(actual,predicted),4))
+    
+predtrain=model.predict(x_train)
+predtest=model.predict(x_test)
+
+## Hyper parameter tuning using GridSearchCV
+
+hyper_dist = {
+    'max_depth':[5,6,7,8,9,10],
+    'min_samples_split':[75,80,90,100], 
+    'min_samples_leaf':[35,40,45,50]
+}
+
+from sklearn.model_selection import GridSearchCV
+grid = GridSearchCV(model,param_grid = hyper_dist, cv = 5, n_jobs=-1, scoring='recall')
+
+grid.fit(x_train,y_train)
+grid.best_estimator_
+grid.best_params_
+
+model_DT=DecisionTreeClassifier( criterion='gini', random_state = 42,max_depth=10, min_samples_leaf=50, max_leaf_nodes= None)
+
+from sklearn.feature_selection import RFE
+
+select = RFE(estimator=model_DT, step=1, n_features_to_select = 7)
+select.fit(x_train,y_train)
+
+
+print("X_train.shape: {}".format(x_train.shape))
+print(select)
+
+x_train_selected = select.transform(x_train)
+x_test_selected=  select.transform(x_test)
+
+select.support_
+print(np.where(select.support_ == True)[0])
+
+clf = model_DT.fit(x_train_selected,y_train)
+predtrain_Dec=clf.predict(x_train_selected)
+predtest_Dec=clf.predict(x_test_selected)
+
+print('TRAINING METRICS')
+print('----------------')
+printmetrics(y_train,predtrain_Dec)
+print('    ')
+print('TEST METRICS')
+print('----------------')
+printmetrics(y_test,predtest_Dec)
+
+plt.figure(figsize=(40,25))
+
+tree.plot_tree(clf, filled=True)
+
+
+
+
+
+
+
+
+
+
+
